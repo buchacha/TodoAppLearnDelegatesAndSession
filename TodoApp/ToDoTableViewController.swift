@@ -7,24 +7,58 @@
 //
 
 import UIKit
+import MultipeerConnectivity
 
-class ToDoTableViewController: UITableViewController, TodoCellDelegate {
-    
+class ToDoTableViewController: UITableViewController, TodoCellDelegate, MCSessionDelegate, MCBrowserViewControllerDelegate {
 
     var todoItems:[TodoItem]!
     
+    var peerID: MCPeerID!
+    var mcSession: MCSession!
+    var mcAdvertiserAssistant: MCAdvertiserAssistant!
+    
     override func viewDidLoad() {
         super.viewDidLoad()
-
+        
+        setupConnectivity()
         loadData()
     }
 
+    func setupConnectivity() {
+        peerID = MCPeerID(displayName: UIDevice.current.name)
+        mcSession = MCSession(peer: peerID, securityIdentity: nil, encryptionPreference: .required)
+        mcSession.delegate = self
+    }
+    
     func loadData() {
         todoItems = [TodoItem]()
         todoItems = DataManager.loadAll(TodoItem.self).sorted(by: {
             $0.createdAt < $1.createdAt
         })
         tableView.reloadData()
+    }
+    
+    @IBAction func showConnectivityAction(_ sender: Any) {
+        let actionSheet = UIAlertController(title: "ToDo Exchange", message: "Do you want to Host or Join a session?", preferredStyle: .actionSheet)
+        
+        actionSheet.addAction(UIAlertAction(title: "Host Session", style: .default, handler: { (action:UIAlertAction) in
+            
+            self.mcAdvertiserAssistant = MCAdvertiserAssistant(serviceType: "ba-td", discoveryInfo: nil, session: self.mcSession)
+            self.mcAdvertiserAssistant.start()
+            
+        }))
+        
+        actionSheet.addAction(UIAlertAction(title: "Join Session", style: .default, handler: { (action:UIAlertAction) in
+            
+            let mcBrowser = MCBrowserViewController(serviceType: "ba-td", session: self.mcSession)
+            mcBrowser.delegate = self
+            self.present(mcBrowser, animated: true, completion: nil)
+            
+        }))
+        
+        actionSheet.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
+        
+        self.present(actionSheet, animated: true, completion: nil)
     }
     
     @IBAction func addNewTodo(_ sender: Any) {
@@ -70,17 +104,32 @@ class ToDoTableViewController: UITableViewController, TodoCellDelegate {
         }
     }
     
+    func didRequestShare(_ cell: ToDoTableViewCell) {
+        if let indexPath = tableView.indexPath(for: cell) {
+            let todoItem = todoItems[indexPath.row]
+            sendTodo(todoItem)
+        }
+    }
+    
+    func sendTodo (_ todoItem:TodoItem) {
+        if mcSession.connectedPeers.count > 0 {
+            if let todoData = DataManager.loadData(todoItem.itemIdentifier.uuidString) {
+                do {
+                    try mcSession.send(todoData, toPeers: mcSession.connectedPeers, with: .reliable)
+                }catch{
+                    fatalError("Could not send todo item")
+                }
+            }
+        }else{
+            print("you are not connected to another device")
+        }
+    }
+    
     func strikeThroughText (_ text:String) -> NSAttributedString {
         let attributeString: NSMutableAttributedString =  NSMutableAttributedString(string: text)
         attributeString.addAttribute(NSAttributedStringKey.strikethroughStyle, value: 1, range: NSMakeRange(0, attributeString.length))
         
         return attributeString
-    }
-    
-    
-    override func didReceiveMemoryWarning() {
-        super.didReceiveMemoryWarning()
-        // Dispose of any resources that can be recreated.
     }
 
     // MARK: - Table view data source
@@ -109,6 +158,59 @@ class ToDoTableViewController: UITableViewController, TodoCellDelegate {
         return cell
     }
     
+    // MC Delegate Functions
+    
+    func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
+        switch state {
+        case MCSessionState.connected:
+            print("Connected: \(peerID.displayName)")
+            
+        case MCSessionState.connecting:
+            print("Connecting: \(peerID.displayName)")
+            
+        case MCSessionState.notConnected:
+            print("Not Connected: \(peerID.displayName)")
+        }
+    }
+    
+    func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
+        do {
+            let todoItem = try JSONDecoder().decode(TodoItem.self, from: data)
+            
+            DataManager.save(todoItem, with: todoItem.itemIdentifier.uuidString)
+            
+            DispatchQueue.main.async {
+                self.todoItems.append(todoItem)
+                
+                let indexPath = IndexPath(row: self.tableView.numberOfRows(inSection: 0), section: 0)
+                
+                self.tableView.insertRows(at: [indexPath], with: .automatic)
+            }
+            
+        }catch{
+            fatalError("Unable to process recieved data")
+        }
+    }
+    
+    func session(_ session: MCSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: MCPeerID) {
+        
+    }
+    
+    func session(_ session: MCSession, didStartReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, with progress: Progress) {
+        
+    }
+    
+    func session(_ session: MCSession, didFinishReceivingResourceWithName resourceName: String, fromPeer peerID: MCPeerID, at localURL: URL?, withError error: Error?) {
+        
+    }
+    
+    func browserViewControllerDidFinish(_ browserViewController: MCBrowserViewController) {
+        dismiss(animated: true, completion: nil)
+    }
+    
+    func browserViewControllerWasCancelled(_ browserViewController: MCBrowserViewController) {
+        dismiss(animated: true, completion: nil)
+    }
 
     /*
     // Override to support conditional editing of the table view.

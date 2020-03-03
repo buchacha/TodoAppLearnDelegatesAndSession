@@ -11,6 +11,7 @@ import UIKit
 protocol TodoCellDelegate {
     func didRequestDelete (_ cell:ToDoTableViewCell)
     func didRequestComplete (_ cell:ToDoTableViewCell)
+    func didRequestShare (_ cell:ToDoTableViewCell)
 }
 
 class ToDoTableViewCell: UITableViewCell {
@@ -36,6 +37,11 @@ class ToDoTableViewCell: UITableViewCell {
         }
     }
     
+    @IBAction func shareTodo(_ sender: Any) {
+        if let delegateObject = self.delegate {
+            delegateObject.didRequestShare(self)
+        }
+    }
     override func setSelected(_ selected: Bool, animated: Bool) {
         super.setSelected(selected, animated: animated)
 
